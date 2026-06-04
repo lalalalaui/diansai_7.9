@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"/d/stm32CubeIDE/STM32CubeIDE_1.18.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.0.202411081344/tools/bin/arm-none-eabi-nm.exe\" e:/diansai/touchh7/build/Debug/CMakeFiles/touchh7.dir/Drivers/BSP/LVGL/lvgl_port.c.obj)",
+      "Bash(cmake --build build/Debug)"
+    ]
+  }
+}
