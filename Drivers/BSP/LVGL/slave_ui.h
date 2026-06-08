@@ -1,0 +1,22 @@
+#ifndef __SLAVE_UI_H
+#define __SLAVE_UI_H
+
+#include <stdbool.h>
+#include <stdint.h>
+#include "lvgl.h"
+
+void slave_ui_create(lv_obj_t *parent);
+
+void slave_ui_set_rx_state(bool carrier_detected,
+                           bool selected_call,
+                           bool group_call,
+                           int16_t rssi_dbm,
+                           uint8_t af_level);
+void slave_ui_set_sms(const char *text, uint8_t sender_id, bool group_call);
+void slave_ui_set_battery(uint16_t millivolts, uint8_t percent);
+void slave_ui_set_waveform(const uint16_t *samples, uint16_t count);
+
+uint8_t slave_ui_get_station_id(void);
+bool slave_ui_group_enabled(void);
+
+#endif

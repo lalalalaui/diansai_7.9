@@ -27,6 +27,7 @@
 
 #include "./BSP/ADC/adc.h"
 #include "./SYSTEM/delay/delay.h"
+#include <string.h>
 
 
 ADC_HandleTypeDef g_adc_handle;           /* ADC句柄 */
@@ -128,8 +129,57 @@ uint32_t adc_get_result_average(uint32_t ch, uint8_t times)
 
 ADC_HandleTypeDef g_adc_dma_handle;     /* 与DMA关联的ADC句柄 */
 DMA_HandleTypeDef g_dma_adc_handle;     /* 与ADC关联的DMA句柄 */
+static TIM_HandleTypeDef g_adc_tim_handle;
+static uint16_t g_adc_dma_snapshot[ADC_DMA_MAX_SAMPLES] __attribute__((section(".dma_buffer"), aligned(32)));
+static uint16_t *g_adc_dma_mem = NULL;
+static uint16_t g_adc_dma_len = 0;
+static uint32_t g_adc_dma_sample_rate_hz = ADC_DMA_SAMPLE_RATE_HZ;
+static volatile uint16_t g_adc_dma_snapshot_len = 0;
+static uint8_t g_adc_dma_started = 0;
 
 volatile uint8_t g_adc_dma_sta = 0;     /* DMA传输状态标志, 0,未完成; 1, 已完成 */
+
+static uint32_t adc_tim6_clock_hz(void)
+{
+    uint32_t tim_clk = HAL_RCC_GetPCLK1Freq();
+
+    if ((RCC->D2CFGR & RCC_D2CFGR_D2PPRE1) != RCC_D2CFGR_D2PPRE1_DIV1)
+    {
+        tim_clk *= 2U;
+    }
+
+    return tim_clk;
+}
+
+static void adc_tim6_trgo_init(void)
+{
+    uint32_t tim_clk;
+    uint32_t period;
+    TIM_MasterConfigTypeDef master_config = {0};
+
+    __HAL_RCC_TIM6_CLK_ENABLE();
+
+    tim_clk = adc_tim6_clock_hz();
+    period = (tim_clk + (ADC_DMA_SAMPLE_RATE_HZ / 2U)) / ADC_DMA_SAMPLE_RATE_HZ;
+    if (period == 0U)
+    {
+        period = 1U;
+    }
+    g_adc_dma_sample_rate_hz = tim_clk / period;
+
+    g_adc_tim_handle.Instance = TIM6;
+    g_adc_tim_handle.Init.Prescaler = 0U;
+    g_adc_tim_handle.Init.CounterMode = TIM_COUNTERMODE_UP;
+    g_adc_tim_handle.Init.Period = period - 1U;
+    g_adc_tim_handle.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    g_adc_tim_handle.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+    HAL_TIM_Base_Init(&g_adc_tim_handle);
+
+    master_config.MasterOutputTrigger = TIM_TRGO_UPDATE;
+    master_config.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+    master_config.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+    HAL_TIMEx_MasterConfigSynchronization(&g_adc_tim_handle, &master_config);
+}
 
 /**
  * @brief       ADC DMA读取 初始化函数
@@ -141,6 +191,13 @@ void adc_dma_init(uint32_t par, uint32_t mar)
 {
     GPIO_InitTypeDef gpio_init_struct;
     ADC_ChannelConfTypeDef adc_ch_conf = {0};
+
+    (void)par;
+
+    g_adc_dma_mem = (uint16_t *)mar;
+    g_adc_dma_len = 0U;
+    g_adc_dma_snapshot_len = 0U;
+    g_adc_dma_started = 0U;
 
     ADC_ADCX_CHY_GPIO_CLK_ENABLE();                                             /* 开启ADC通道IO引脚时钟 */
     ADC_ADCX_CHY_CLK_ENABLE();                                                  /* 使能ADC1/2时钟 */
@@ -169,7 +226,7 @@ void adc_dma_init(uint32_t par, uint32_t mar)
     g_dma_adc_handle.Init.MemInc = DMA_MINC_ENABLE;                             /* 存储器增量模式 */
     g_dma_adc_handle.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;        /* 外设数据长度:16位 */
     g_dma_adc_handle.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;           /* 存储器数据长度:16位 */
-    g_dma_adc_handle.Init.Mode = DMA_NORMAL;                                    /* 外设流控模式 */
+    g_dma_adc_handle.Init.Mode = DMA_CIRCULAR;                                    /* 外设流控模式 */
     g_dma_adc_handle.Init.Priority = DMA_PRIORITY_MEDIUM;                       /* 中等优先级 */
     g_dma_adc_handle.Init.FIFOMode = DMA_FIFOMODE_DISABLE;                      /* 禁止FIFO*/
     HAL_DMA_Init(&g_dma_adc_handle);                                            /* 初始化DMA */
@@ -183,16 +240,16 @@ void adc_dma_init(uint32_t par, uint32_t mar)
     g_adc_dma_handle.Init.ScanConvMode = DISABLE;                                       /* 非扫描模式 */
     g_adc_dma_handle.Init.EOCSelection = ADC_EOC_SINGLE_CONV;                           /* 关闭EOC中断 */
     g_adc_dma_handle.Init.LowPowerAutoWait = DISABLE;                                   /* 自动低功耗关闭 */
-    g_adc_dma_handle.Init.ContinuousConvMode = ENABLE;                                  /* 开启连续转换 */
+    g_adc_dma_handle.Init.ContinuousConvMode = DISABLE;                                  /* 开启连续转换 */
     g_adc_dma_handle.Init.NbrOfConversion = 1;                                          /* 1个转换在规则序列中 也就是只转换规则序列1 */
     g_adc_dma_handle.Init.DiscontinuousConvMode = DISABLE;                              /* 禁止不连续采样模式 */
     g_adc_dma_handle.Init.NbrOfDiscConversion = 0;                                      /* 不连续采样通道数为0 */
-    g_adc_dma_handle.Init.ExternalTrigConv = ADC_SOFTWARE_START;                        /* 软件触发 */
-    g_adc_dma_handle.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;         /* 使用软件触发 */
+    g_adc_dma_handle.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T6_TRGO;                        /* 软件触发 */
+    g_adc_dma_handle.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;         /* 使用软件触发 */
     g_adc_dma_handle.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;                           /* 有新的数据时直接覆盖掉旧数据 */
     g_adc_dma_handle.Init.OversamplingMode = DISABLE;                                   /* 过采样关闭 */
     g_adc_dma_handle.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;                         /* 设置ADC转换结果的左移位数 */
-    g_adc_dma_handle.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DMA_ONESHOT;    /* DMA单次传输ADC数据 */
+    g_adc_dma_handle.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DMA_CIRCULAR;    /* DMA单次传输ADC数据 */
     HAL_ADC_Init(&g_adc_dma_handle);                                                    /* 初始化 */
 
     HAL_ADCEx_Calibration_Start(&g_adc_dma_handle, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED); /* ADC校准 */
@@ -200,7 +257,7 @@ void adc_dma_init(uint32_t par, uint32_t mar)
     /* 配置ADC通道 */
     adc_ch_conf.Channel = ADC_ADCX_CHY;                                         /* 配置使用的ADC通道 */
     adc_ch_conf.Rank = ADC_REGULAR_RANK_1;                                      /* 采样序列里的第1个 */
-    adc_ch_conf.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;                      /* 采样周期为810.5个时钟周期 */
+    adc_ch_conf.SamplingTime = ADC_SAMPLETIME_64CYCLES_5;                      /* 采样周期为387.5个时钟周期 */
     adc_ch_conf.SingleDiff = ADC_SINGLE_ENDED ;                                 /* 单端输入 */
     adc_ch_conf.OffsetNumber = ADC_OFFSET_NONE;                                 /* 无偏移 */
     adc_ch_conf.Offset = 0;                                                     /* 无偏移的情况下，此参数忽略 */
@@ -212,8 +269,7 @@ void adc_dma_init(uint32_t par, uint32_t mar)
     HAL_NVIC_SetPriority(ADC_ADCX_DMASx_IRQn, 3, 3);                            /* 设置DMA中断优先级为3，子优先级为3 */
     HAL_NVIC_EnableIRQ(ADC_ADCX_DMASx_IRQn);                                    /* 使能DMA中断 */
     
-    HAL_DMA_Start_IT(&g_dma_adc_handle, par, mar, 0);                           /* 启动DMA，并开启中断 */
-    HAL_ADC_Start_DMA(&g_adc_dma_handle, &mar, 0);                              /* 开始DMA数据传输 */
+    adc_tim6_trgo_init();
 }
 
 /**
@@ -223,16 +279,31 @@ void adc_dma_init(uint32_t par, uint32_t mar)
  */
 void adc_dma_enable(uint16_t ndtr)
 {
-    ADC_ADCX->CR &= ~(1 << 0);         /* 先关闭ADC */
+    if (g_adc_dma_started || g_adc_dma_mem == NULL || ndtr == 0U || ndtr > ADC_DMA_MAX_SAMPLES)
+    {
+        return;
+    }
 
-    ADC_ADCX_DMASx->CR &= ~(1 << 0);   /* 关闭DMA传输 */
-    while (ADC_ADCX_DMASx->CR & 0X1);  /* 确保DMA可以被设置 */
-    ADC_ADCX_DMASx->NDTR = ndtr;       /* 要传输的数据项数目 */
-    ADC_ADCX_DMASx->CR |= 1 << 0;      /* 开启DMA传输 */
- 
-    ADC_ADCX->CR |= 1 << 0;            /* 重新启动ADC */
-    ADC_ADCX->CR |= 1 << 2;            /* 启动常规转换通道 */
+    g_adc_dma_len = ndtr;
+    g_adc_dma_sta = 0U;
+    g_adc_dma_snapshot_len = 0U;
+
+    if (HAL_ADC_Start_DMA(&g_adc_dma_handle, (uint32_t *)g_adc_dma_mem, ndtr) != HAL_OK)
+    {
+        return;
+    }
+
+    __HAL_DMA_DISABLE_IT(&g_dma_adc_handle, DMA_IT_HT);
+
+    if (HAL_TIM_Base_Start(&g_adc_tim_handle) != HAL_OK)
+    {
+        HAL_ADC_Stop_DMA(&g_adc_dma_handle);
+        return;
+    }
+
+    g_adc_dma_started = 1U;
 }
+
 
 /**
  * @brief       ADC DMA采集中断服务函数
@@ -241,10 +312,57 @@ void adc_dma_enable(uint16_t ndtr)
  */
 void ADC_ADCX_DMASx_IRQHandler(void)
 {
-    if (ADC_ADCX_DMASx_IS_TC())        /* 判断DMA数据传输完成 */
+    HAL_DMA_IRQHandler(&g_dma_adc_handle);
+}
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
+{
+    if (hadc == &g_adc_dma_handle)
     {
-        g_adc_dma_sta = 1;             /* 标记DMA传输完成 */
-        ADC_ADCX_DMASx_CLR_TC();       /* 清除DMA1 数据流7 传输完成中断 */
+        if (g_adc_dma_mem != NULL && g_adc_dma_len > 0U)
+        {
+            uint32_t bytes = ((uint32_t)g_adc_dma_len * sizeof(uint16_t) + 31U) & ~31U;
+            SCB_InvalidateDCache_by_Addr((uint32_t *)g_adc_dma_mem, bytes);
+            memcpy(g_adc_dma_snapshot, g_adc_dma_mem, (uint32_t)g_adc_dma_len * sizeof(uint16_t));
+            g_adc_dma_snapshot_len = g_adc_dma_len;
+            g_adc_dma_sta = 1U;
+        }
     }
 }
+
+uint16_t adc_dma_read_snapshot(uint16_t *dst, uint16_t max_count)
+{
+    uint16_t count;
+    uint32_t primask;
+
+    if (dst == NULL || max_count == 0U || g_adc_dma_sta == 0U)
+    {
+        return 0U;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+
+    count = g_adc_dma_snapshot_len;
+    if (count > max_count)
+    {
+        count = max_count;
+    }
+
+    memcpy(dst, g_adc_dma_snapshot, (uint32_t)count * sizeof(uint16_t));
+    g_adc_dma_sta = 0U;
+
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+
+    return count;
+}
+
+uint32_t adc_dma_get_sample_rate_hz(void)
+{
+    return g_adc_dma_sample_rate_hz;
+}
+
 

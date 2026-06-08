@@ -1,4 +1,5 @@
 #include "./BSP/LVGL/lvgl_port.h"
+#include "./BSP/LVGL/slave_ui.h"
 
 #include "./BSP/LCD/lcd.h"
 #include "./BSP/TOUCH/touch.h"
@@ -13,6 +14,7 @@ static lv_color_t g_lvgl_draw_buf[LVGL_DRAW_BUF_PIXELS] __attribute__((section("
 static lv_display_t *g_lvgl_disp;
 static lv_indev_t *g_lvgl_touch;
 
+#if 0
 /* ---- Extern variables from main.c ---- */
 extern uint16_t g_adc_raw;
 extern uint32_t g_adc_mv;
@@ -192,6 +194,7 @@ static void ui_update_timer_cb(lv_timer_t *timer)
     snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu", (unsigned long)h, (unsigned long)m, (unsigned long)s);
     lv_label_set_text(g_label_uptime, buf);
 }
+#endif
 
 /* ========== LVGL Tick, Flush, Touch ========== */
 
@@ -257,6 +260,8 @@ void lvgl_port_init(void)
 
 void lvgl_port_demo_create(void)
 {
+    slave_ui_create(lv_screen_active());
+#if 0
     lv_obj_t *screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, C_BG, 0);
     lv_obj_set_style_pad_all(screen, 0, 0);
@@ -412,4 +417,5 @@ void lvgl_port_demo_create(void)
 
     /* ==================== Periodic update timer ==================== */
     lv_timer_create(ui_update_timer_cb, 100, NULL);
+#endif
 }

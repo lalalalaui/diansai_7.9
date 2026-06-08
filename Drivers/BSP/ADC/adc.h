@@ -53,6 +53,9 @@
 
 /******************************************************************************************/
 
+#define ADC_DMA_SAMPLE_RATE_HZ                               24000U
+#define ADC_DMA_MAX_SAMPLES                                  1024U
+
 void adc_init(void);                                          /* ADC通道初始化 */
 uint32_t adc_get_result(uint32_t ch);                         /* 获得某个通道值  */
 uint32_t adc_get_result_average(uint32_t ch, uint8_t times);  /* 得到某个通道给定次数采样的平均值 */
@@ -60,5 +63,7 @@ uint32_t adc_get_result_average(uint32_t ch, uint8_t times);  /* 得到某个通
 extern volatile uint8_t g_adc_dma_sta;                        /* DMA传输完成标志 */
 void adc_dma_init(uint32_t par, uint32_t mar);                /* ADC DMA采集初始化 */
 void adc_dma_enable( uint16_t ndtr);                          /* 使能一次ADC DMA采集传输 */
+uint16_t adc_dma_read_snapshot(uint16_t *dst, uint16_t max_count);
+uint32_t adc_dma_get_sample_rate_hz(void);
 
 #endif 
