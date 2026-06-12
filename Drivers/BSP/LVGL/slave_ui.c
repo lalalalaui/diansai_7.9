@@ -506,9 +506,11 @@ static void render_home(void)
     make_row(rx, 212, "Data", "AFSK 100bps", C_TEXT);
 
     lv_obj_t *msg = make_panel(c, 396, 94, 396, 250, "Last Message");
-    snprintf(value, sizeof(value), "From: %s%u",
-             g_ui.state.group_call ? "Group/S" : "S",
-             g_ui.state.last_sender);
+    if (g_ui.state.group_call) {
+        snprintf(value, sizeof(value), "From: ALL (group)");
+    } else {
+        snprintf(value, sizeof(value), "From: S%u", g_ui.state.last_sender);
+    }
     make_label(msg, value, 14, 48, &lv_font_montserrat_14, C_MUTED);
 
     lv_obj_t *sms = make_label(msg,
@@ -611,8 +613,11 @@ static void render_sms(void)
 
     /* ---- SMS Inbox (middle) ---- */
     lv_obj_t *inbox = make_panel(c, inbox_x, pad, inbox_w, panel_h, "SMS Characters");
-    snprintf(value, sizeof(value), "Addr: S%u%s", g_ui.state.last_sender,
-             g_ui.state.group_call ? " / group" : "");
+    if (g_ui.state.group_call) {
+        snprintf(value, sizeof(value), "Addr: ALL (group)");
+    } else {
+        snprintf(value, sizeof(value), "Addr: S%u", g_ui.state.last_sender);
+    }
     make_label(inbox, value, 12, 40, &lv_font_montserrat_14, C_MUTED);
 
     lv_obj_t *body = make_panel(inbox, 12, 70, inbox_w - 32, panel_h - 88, NULL);
@@ -1124,12 +1129,11 @@ void slave_ui_set_sms(const char *text, uint8_t sender_id, bool group_call)
         text = "";
     }
 
-    /* ===== Address filter: only accept matching station or group call ===== */
-    bool is_group_sender = (sender_id == 0xFFU);
-    bool addr_match = (sender_id == g_ui.state.station_id);
-    bool group_accept = (is_group_sender && g_ui.state.group_enabled);
-
-    if (!addr_match && !group_accept) {
+    /* ===== Address filter =====
+     * Group call (sender_id == 0xFF): ALWAYS accept, regardless of group_enabled.
+     * Normal call: only accept if sender_id matches local station_id.
+     */
+    if (sender_id != 0xFFU && sender_id != g_ui.state.station_id) {
         char drop_msg[96];
         snprintf(drop_msg, sizeof(drop_msg), "DROP S%u: %s", sender_id,
                  text[0] ? text : "(empty)");
@@ -1139,7 +1143,7 @@ void slave_ui_set_sms(const char *text, uint8_t sender_id, bool group_call)
     /* ===== End address filter ===== */
 
     snprintf(g_ui.state.sms_text, sizeof(g_ui.state.sms_text), "%s", text);
-    g_ui.state.last_sender = sender_id % SLAVE_STATION_COUNT;
+    g_ui.state.last_sender = (sender_id == 0xFFU) ? 0U : (sender_id % SLAVE_STATION_COUNT);
     g_ui.state.group_call = group_call;
     g_ui.state.packet_count++;
     g_ui.state.carrier_detected = true;

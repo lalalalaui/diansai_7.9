@@ -376,31 +376,47 @@ static fpga_display_result_t fpga_handle_json(char *line)
         (void)fpga_json_get_int(line, "addr", &addr);
         (void)fpga_json_get_int(line, "length", &length);
         (void)fpga_json_get_bool(line, "crc_ok", &crc_ok);
-        group_call = ((uint8_t)addr == 0xFFU);
+
+        /* Try PYNQ group_call / addr_ok fields; fallback: addr==0xFF */
+        bool json_group_call = false;
+        bool addr_ok = false;
+        (void)fpga_json_get_bool(line, "group_call", &json_group_call);
+        (void)fpga_json_get_bool(line, "addr_ok", &addr_ok);
+        group_call = json_group_call || ((uint8_t)addr == 0xFFU);
 
         fpga_filter_text(payload, sizeof(payload), payload);
         if (payload[0] == '\0') {
             snprintf(payload, sizeof(payload), "(empty)");
         }
 
-        /* Log SMS detection BEFORE address filter, so every captured frame is visible */
-        snprintf(status, sizeof(status), "SMS addr=%ld len=%ld crc=%s",
-                 (long)addr,
-                 (long)length,
-                 crc_ok ? "OK" : "FAIL");
-        slave_ui_set_capture_state(status);
-        slave_ui_append_log(status);
+        /* CRC fail: log action only, do NOT display in SMS Characters */
+        if (!crc_ok) {
+            slave_ui_append_log("CRC FAIL ignored");
+            g_fpga_sms_lines++;
+            return FPGA_DISPLAY_RESULT_SMS;
+        }
 
-        slave_ui_set_sms(payload, (uint8_t)addr, group_call);
+        /* Group call always displays; normal call: addr must match local station */
+        if (group_call || ((uint8_t)addr == slave_ui_get_station_id())) {
+            slave_ui_set_sms(payload, (uint8_t)addr, group_call);
+        } else {
+            snprintf(status, sizeof(status), "DROP S%ld: %s",
+                     (long)addr,
+                     payload[0] ? payload : "(empty)");
+            slave_ui_append_log(status);
+        }
+
         g_fpga_sms_lines++;
         return FPGA_DISPLAY_RESULT_SMS;
     }
 
-    fpga_json_log_summary(line);
+    /* Non-SMS JSON (status/test/attempt): raw echo already shows it; skip extra logging */
     if (strcmp(kind, "status") == 0) {
+        fpga_json_log_summary(line);
         return FPGA_DISPLAY_RESULT_STATUS;
     }
     if (strcmp(kind, "test") == 0) {
+        fpga_json_log_summary(line);
         return FPGA_DISPLAY_RESULT_TEST;
     }
     if (strcmp(kind, "attempt") == 0) {
@@ -416,6 +432,7 @@ static fpga_display_result_t fpga_handle_sms(char *args)
     char *addr_s;
     char *text_s;
     char text[FPGA_DISPLAY_TEXT_MAX + 1U];
+    char status[64];
     uint8_t addr;
     bool group_call;
 
@@ -442,7 +459,16 @@ static fpga_display_result_t fpga_handle_sms(char *args)
     }
 
     group_call = (addr == 0xFFU);
-    slave_ui_set_sms(text, addr, group_call);
+
+    /* Group call always displays; normal call: addr must match local station */
+    if (group_call || (addr == slave_ui_get_station_id())) {
+        slave_ui_set_sms(text, addr, group_call);
+    } else {
+        snprintf(status, sizeof(status), "DROP S%u: %s", addr,
+                 text[0] ? text : "(empty)");
+        slave_ui_append_log(status);
+    }
+
     g_fpga_sms_lines++;
     return FPGA_DISPLAY_RESULT_SMS;
 }
@@ -588,6 +614,9 @@ fpga_display_result_t FPGA_DisplayProcessLine(const char *line)
 
     snprintf(buf, sizeof(buf), "%s", line);
     fpga_trim_right(buf);
+
+    /* Raw echo: every line PYNQ sends is shown in the right-side log */
+    slave_ui_append_log(buf);
 
     if (buf[0] == '{') {
         result = fpga_handle_json(buf);
