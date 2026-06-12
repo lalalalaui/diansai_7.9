@@ -10,6 +10,27 @@
 static uint32_t g_fpga_bad_lines = 0U;
 static uint32_t g_fpga_sms_lines = 0U;
 static uint32_t g_fpga_rx_lines = 0U;
+static uint32_t g_fpga_log_lines = 0U;
+
+static void fpga_send_command(const char *command)
+{
+    char line[24];
+    int len;
+
+    if (command == NULL) {
+        return;
+    }
+
+    len = snprintf(line, sizeof(line), "%s\r\n", command);
+    if (len <= 0) {
+        return;
+    }
+    if (len >= (int)sizeof(line)) {
+        len = (int)sizeof(line) - 1;
+    }
+
+    (void)HAL_UART_Transmit(&g_uart1_handle, (uint8_t *)line, (uint16_t)len, 100U);
+}
 
 static char *fpga_skip_space(char *s)
 {
@@ -205,6 +226,187 @@ static void fpga_filter_text(char *dst, size_t dst_size, const char *src)
     dst[n] = '\0';
 }
 
+static bool fpga_json_get_string(const char *line, const char *key, char *out, size_t out_size)
+{
+    char pattern[32];
+    const char *p;
+    size_t n = 0U;
+
+    if (line == NULL || key == NULL || out == NULL || out_size == 0U) {
+        return false;
+    }
+
+    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    p = strstr(line, pattern);
+    if (p == NULL) {
+        return false;
+    }
+    p += strlen(pattern);
+
+    while (*p != '\0' && *p != '"' && n < out_size - 1U) {
+        if (*p == '\\' && p[1] != '\0') {
+            p++;
+        }
+        out[n++] = *p++;
+    }
+    out[n] = '\0';
+    return true;
+}
+
+static bool fpga_json_get_int(const char *line, const char *key, int32_t *value)
+{
+    char pattern[32];
+    const char *p;
+    int32_t sign = 1;
+    int32_t v = 0;
+    bool any = false;
+
+    if (line == NULL || key == NULL || value == NULL) {
+        return false;
+    }
+
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    p = strstr(line, pattern);
+    if (p == NULL) {
+        return false;
+    }
+    p += strlen(pattern);
+
+    if (*p == '-') {
+        sign = -1;
+        p++;
+    }
+
+    while (*p >= '0' && *p <= '9') {
+        any = true;
+        v = (v * 10) + (*p - '0');
+        p++;
+    }
+
+    if (!any) {
+        return false;
+    }
+
+    *value = v * sign;
+    return true;
+}
+
+static bool fpga_json_get_bool(const char *line, const char *key, bool *value)
+{
+    char pattern[32];
+    const char *p;
+
+    if (line == NULL || key == NULL || value == NULL) {
+        return false;
+    }
+
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    p = strstr(line, pattern);
+    if (p == NULL) {
+        return false;
+    }
+    p += strlen(pattern);
+
+    if (strncmp(p, "true", 4U) == 0) {
+        *value = true;
+        return true;
+    }
+    if (strncmp(p, "false", 5U) == 0) {
+        *value = false;
+        return true;
+    }
+    return false;
+}
+
+static void fpga_json_log_summary(const char *line)
+{
+    char kind[24];
+    char state[40];
+    char result[40];
+    int32_t attempt = 0;
+    char msg[FPGA_DISPLAY_TEXT_MAX];
+
+    if (!fpga_json_get_string(line, "kind", kind, sizeof(kind))) {
+        return;
+    }
+
+    if (strcmp(kind, "attempt") == 0) {
+        state[0] = '\0';
+        (void)fpga_json_get_string(line, "state", state, sizeof(state));
+        (void)fpga_json_get_int(line, "attempt", &attempt);
+        snprintf(msg, sizeof(msg), "attempt %02ld: %s",
+                 (long)attempt,
+                 state[0] ? state : "...");
+        slave_ui_append_log(msg);
+        slave_ui_set_capture_state(msg);
+    } else if (strcmp(kind, "status") == 0) {
+        result[0] = '\0';
+        (void)fpga_json_get_string(line, "result", result, sizeof(result));
+        snprintf(msg, sizeof(msg), "PYNQ %s", result[0] ? result : "status");
+        slave_ui_set_pynq_status(msg);
+        slave_ui_append_log(msg);
+    } else if (strcmp(kind, "test") == 0) {
+        result[0] = '\0';
+        state[0] = '\0';
+        (void)fpga_json_get_string(line, "result", result, sizeof(result));
+        (void)fpga_json_get_string(line, "state", state, sizeof(state));
+        snprintf(msg, sizeof(msg), "TEST %s", result[0] ? result : (state[0] ? state : "--"));
+        slave_ui_set_test_result(msg);
+        slave_ui_append_log(msg);
+    }
+}
+
+static fpga_display_result_t fpga_handle_json(char *line)
+{
+    char kind[24];
+    char payload[FPGA_DISPLAY_TEXT_MAX + 1U];
+    char status[48];
+    int32_t addr = 0;
+    int32_t length = 0;
+    bool crc_ok = false;
+    bool group_call;
+
+    if (!fpga_json_get_string(line, "kind", kind, sizeof(kind))) {
+        return FPGA_DISPLAY_RESULT_BAD_LINE;
+    }
+
+    if (strcmp(kind, "sms") == 0) {
+        payload[0] = '\0';
+        (void)fpga_json_get_string(line, "payload", payload, sizeof(payload));
+        (void)fpga_json_get_int(line, "addr", &addr);
+        (void)fpga_json_get_int(line, "length", &length);
+        (void)fpga_json_get_bool(line, "crc_ok", &crc_ok);
+        group_call = ((uint8_t)addr == 0xFFU);
+
+        fpga_filter_text(payload, sizeof(payload), payload);
+        if (payload[0] == '\0') {
+            snprintf(payload, sizeof(payload), "(empty)");
+        }
+        slave_ui_set_sms(payload, (uint8_t)addr, group_call);
+        snprintf(status, sizeof(status), "SMS len=%ld crc=%s",
+                 (long)length,
+                 crc_ok ? "OK" : "?");
+        slave_ui_set_capture_state(status);
+        slave_ui_append_log(status);
+        g_fpga_sms_lines++;
+        return FPGA_DISPLAY_RESULT_SMS;
+    }
+
+    fpga_json_log_summary(line);
+    if (strcmp(kind, "status") == 0) {
+        return FPGA_DISPLAY_RESULT_STATUS;
+    }
+    if (strcmp(kind, "test") == 0) {
+        return FPGA_DISPLAY_RESULT_TEST;
+    }
+    if (strcmp(kind, "attempt") == 0) {
+        g_fpga_log_lines++;
+        return FPGA_DISPLAY_RESULT_LOG;
+    }
+
+    return FPGA_DISPLAY_RESULT_LOG;
+}
+
 static fpga_display_result_t fpga_handle_sms(char *args)
 {
     char *addr_s;
@@ -236,7 +438,7 @@ static fpga_display_result_t fpga_handle_sms(char *args)
     }
 
     group_call = (addr == 0xFFU);
-    slave_ui_set_sms(text, 0U, group_call);
+    slave_ui_set_sms(text, addr, group_call);
     g_fpga_sms_lines++;
     return FPGA_DISPLAY_RESULT_SMS;
 }
@@ -320,11 +522,52 @@ static fpga_display_result_t fpga_handle_battery(char *args)
     return FPGA_DISPLAY_RESULT_BATTERY;
 }
 
+static fpga_display_result_t fpga_handle_log(char *args)
+{
+    args = fpga_skip_space(args);
+    fpga_trim_right(args);
+    if (args[0] == '\0') {
+        return FPGA_DISPLAY_RESULT_BAD_LINE;
+    }
+    slave_ui_append_log(args);
+    g_fpga_log_lines++;
+    return FPGA_DISPLAY_RESULT_LOG;
+}
+
+static fpga_display_result_t fpga_handle_status(char *args)
+{
+    args = fpga_skip_space(args);
+    fpga_trim_right(args);
+    if (args[0] == '\0') {
+        return FPGA_DISPLAY_RESULT_BAD_LINE;
+    }
+    slave_ui_set_pynq_status(args);
+    slave_ui_append_log(args);
+    return FPGA_DISPLAY_RESULT_STATUS;
+}
+
+static fpga_display_result_t fpga_handle_test(char *args)
+{
+    args = fpga_skip_space(args);
+    fpga_trim_right(args);
+    if (args[0] == '\0') {
+        return FPGA_DISPLAY_RESULT_BAD_LINE;
+    }
+    slave_ui_set_test_result(args);
+    slave_ui_append_log(args);
+    return FPGA_DISPLAY_RESULT_TEST;
+}
+
 void FPGA_DisplayInit(void)
 {
     g_fpga_bad_lines = 0U;
     g_fpga_sms_lines = 0U;
     g_fpga_rx_lines = 0U;
+    g_fpga_log_lines = 0U;
+    slave_ui_set_command_callback(fpga_send_command);
+    slave_ui_set_pynq_status("BOOT WAIT");
+    slave_ui_set_capture_state("IDLE");
+    slave_ui_set_test_result("--");
 }
 
 fpga_display_result_t FPGA_DisplayProcessLine(const char *line)
@@ -341,6 +584,14 @@ fpga_display_result_t FPGA_DisplayProcessLine(const char *line)
 
     snprintf(buf, sizeof(buf), "%s", line);
     fpga_trim_right(buf);
+
+    if (buf[0] == '{') {
+        result = fpga_handle_json(buf);
+        if (result == FPGA_DISPLAY_RESULT_BAD_LINE) {
+            g_fpga_bad_lines++;
+        }
+        return result;
+    }
 
     cmd = fpga_skip_space(buf);
     args = strchr(cmd, ',');
@@ -372,6 +623,23 @@ fpga_display_result_t FPGA_DisplayProcessLine(const char *line)
 
         snprintf(rx_line, sizeof(rx_line), "1,1,0,%s", args);
         result = fpga_handle_rx(rx_line);
+    }
+    else if (strcmp(cmd, "STATUS") == 0 && args != NULL)
+    {
+        result = fpga_handle_status(args);
+    }
+    else if (strcmp(cmd, "TEST") == 0 && args != NULL)
+    {
+        result = fpga_handle_test(args);
+    }
+    else if (strcmp(cmd, "LOG") == 0 && args != NULL)
+    {
+        result = fpga_handle_log(args);
+    }
+    else if (strcmp(cmd, "ERR") == 0 && args != NULL)
+    {
+        result = fpga_handle_log(args);
+        slave_ui_set_capture_state("ERROR");
     }
     else
     {

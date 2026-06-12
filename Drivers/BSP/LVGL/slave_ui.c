@@ -7,6 +7,9 @@
 
 #define SLAVE_STATION_COUNT       8U
 #define SMS_TEXT_MAX              96U
+#define PYNQ_TEXT_MAX             96U
+#define PYNQ_LOG_LINES            7U
+#define PYNQ_LOG_LINE_MAX         64U
 #define WAVE_POINT_COUNT          160U
 #define ADC_REF_MV                3300U
 #define ADC_FULL_SCALE            65535U
@@ -54,6 +57,11 @@ typedef struct {
     uint32_t packet_count;
     uint8_t last_sender;
     char sms_text[SMS_TEXT_MAX];
+    char pynq_status[PYNQ_TEXT_MAX];
+    char test_result[PYNQ_TEXT_MAX];
+    char capture_state[PYNQ_TEXT_MAX];
+    char log_lines[PYNQ_LOG_LINES][PYNQ_LOG_LINE_MAX];
+    uint8_t log_count;
     uint16_t wave_min;
     uint16_t wave_max;
     uint16_t wave_avg;
@@ -88,6 +96,11 @@ typedef struct {
     lv_obj_t *label_station_value;
     lv_obj_t *label_group_value;
     lv_obj_t *label_wave_info;
+    lv_obj_t *label_pynq_status;
+    lv_obj_t *label_test_result;
+    lv_obj_t *label_capture_state;
+    lv_obj_t *label_sms_body;
+    lv_obj_t *label_log;
     lv_obj_t *wave_line;
     lv_obj_t *bar_af;
     lv_obj_t *bar_rssi;
@@ -99,6 +112,7 @@ typedef struct {
 static slave_ui_t g_ui;
 static uint16_t g_wave_low_freq_buf[WAVE_LOW_FREQ_BUF_SIZE];
 static uint16_t g_wave_low_freq_len = 0U;
+static void (*g_command_callback)(const char *command) = NULL;
 
 #define C_BG        lv_color_hex(0x0F1419)
 #define C_PANEL     lv_color_hex(0x172028)
@@ -112,6 +126,8 @@ static uint16_t g_wave_low_freq_len = 0U;
 #define C_BAD       lv_color_hex(0xE96666)
 
 static void render_page(slave_page_t page);
+static void command_button_event(lv_event_t *event);
+static void update_pynq_labels(void);
 static void push_frequency_sample(uint32_t freq_x10);
 static void append_low_frequency_samples(const uint16_t *samples, uint16_t count);
 static uint32_t estimate_low_frequency_x10(uint32_t hint_freq_x10);
@@ -372,6 +388,23 @@ static void simulate_call_event(lv_event_t *event)
     render_page(PAGE_HOME);
 }
 
+static void command_button_event(lv_event_t *event)
+{
+    const char *command = (const char *)lv_event_get_user_data(event);
+
+    if (command == NULL) {
+        return;
+    }
+
+    snprintf(g_ui.state.capture_state, sizeof(g_ui.state.capture_state), "%s sent", command);
+    slave_ui_append_log(command);
+    update_pynq_labels();
+
+    if (g_command_callback != NULL) {
+        g_command_callback(command);
+    }
+}
+
 static void update_nav(void)
 {
     for (uint8_t i = 0; i < PAGE_COUNT; i++) {
@@ -379,6 +412,58 @@ static void update_nav(void)
         lv_color_t fg = (i == (uint8_t)g_ui.page) ? C_BG : C_TEXT;
         lv_obj_set_style_bg_color(g_ui.nav_btn[i], bg, 0);
         lv_obj_set_style_text_color(lv_obj_get_child(g_ui.nav_btn[i], 0), fg, 0);
+    }
+}
+
+static void update_pynq_labels(void)
+{
+    if (g_ui.label_pynq_status != NULL) {
+        lv_label_set_text(g_ui.label_pynq_status,
+                          g_ui.state.pynq_status[0] ? g_ui.state.pynq_status : "BOOT WAIT");
+    }
+
+    if (g_ui.label_test_result != NULL) {
+        lv_label_set_text(g_ui.label_test_result,
+                          g_ui.state.test_result[0] ? g_ui.state.test_result : "--");
+    }
+
+    if (g_ui.label_capture_state != NULL) {
+        lv_label_set_text(g_ui.label_capture_state,
+                          g_ui.state.capture_state[0] ? g_ui.state.capture_state : "IDLE");
+    }
+
+    if (g_ui.label_sms_body != NULL) {
+        lv_label_set_text(g_ui.label_sms_body,
+                          g_ui.state.sms_text[0] ? g_ui.state.sms_text : "(waiting for PYNQ SMS)");
+        lv_obj_set_style_text_color(g_ui.label_sms_body,
+                                    g_ui.state.sms_text[0] ? C_TEXT : C_MUTED,
+                                    0);
+    }
+
+    if (g_ui.label_log != NULL) {
+        char joined[(PYNQ_LOG_LINES * (PYNQ_LOG_LINE_MAX + 1U))];
+        size_t pos = 0U;
+
+        joined[0] = '\0';
+        for (uint8_t i = 0; i < g_ui.state.log_count; i++) {
+            int written = snprintf(&joined[pos], sizeof(joined) - pos,
+                                   "%s%s",
+                                   g_ui.state.log_lines[i],
+                                   (i + 1U < g_ui.state.log_count) ? "\n" : "");
+            if (written <= 0) {
+                break;
+            }
+            if ((size_t)written >= sizeof(joined) - pos) {
+                pos = sizeof(joined) - 1U;
+                break;
+            }
+            pos += (size_t)written;
+        }
+
+        if (joined[0] == '\0') {
+            snprintf(joined, sizeof(joined), "waiting for PYNQ...");
+        }
+        lv_label_set_text(g_ui.label_log, joined);
     }
 }
 
@@ -487,32 +572,48 @@ static void render_sms(void)
     lv_obj_t *c = g_ui.content;
     char value[48];
 
-    lv_obj_t *inbox = make_panel(c, 8, 8, 502, 336, "SMS Inbox");
-    snprintf(value, sizeof(value), "Last sender: S%u", g_ui.state.last_sender);
-    make_label(inbox, value, 14, 48, &lv_font_montserrat_14, C_MUTED);
-    make_label(inbox, g_ui.state.group_call ? "Frame: GROUP + ASCII + CRC" : "Frame: ADDR + ASCII + CRC",
-               14, 76, &lv_font_montserrat_14, C_MUTED);
+    lv_obj_t *control = make_panel(c, 8, 8, 248, 336, "PYNQ Control");
+    lv_obj_t *btn;
+    make_label(control, "UART1 115200 8N1", 14, 42, &lv_font_montserrat_14, C_MUTED);
+    btn = make_button(control, "STATUS", 14, 76, 102, 42, C_PANEL_2, NULL);
+    lv_obj_add_event_cb(btn, command_button_event, LV_EVENT_CLICKED, "STATUS");
+    btn = make_button(control, "TEST", 128, 76, 88, 42, C_PANEL_2, NULL);
+    lv_obj_add_event_cb(btn, command_button_event, LV_EVENT_CLICKED, "TEST");
+    btn = make_button(control, "CAPTURE", 14, 132, 202, 48, C_ACCENT, NULL);
+    lv_obj_add_event_cb(btn, command_button_event, LV_EVENT_CLICKED, "CAPTURE");
+    make_button(control, "CLEAR", 14, 272, 94, 40, C_WARN, sms_clear_event);
 
-    lv_obj_t *body = make_panel(inbox, 14, 112, 474, 140, NULL);
-    lv_obj_t *sms = make_label(body,
-                               g_ui.state.sms_text[0] ? g_ui.state.sms_text : "(waiting for English SMS)",
-                               12, 14,
-                               &lv_font_montserrat_18,
-                               g_ui.state.sms_text[0] ? C_TEXT : C_MUTED);
-    lv_obj_set_width(sms, 448);
-    lv_label_set_long_mode(sms, LV_LABEL_LONG_WRAP);
+    lv_obj_t *state = make_panel(control, 14, 194, 202, 64, NULL);
+    g_ui.label_capture_state = make_label(state, "IDLE", 10, 10, &lv_font_montserrat_14, C_TEXT);
+    lv_obj_set_width(g_ui.label_capture_state, 182);
+    lv_label_set_long_mode(g_ui.label_capture_state, LV_LABEL_LONG_CLIP);
+    g_ui.label_test_result = make_label(state, "--", 10, 36, &lv_font_montserrat_14, C_ACCENT);
+    lv_obj_set_width(g_ui.label_test_result, 182);
+    lv_label_set_long_mode(g_ui.label_test_result, LV_LABEL_LONG_CLIP);
 
-    make_button(inbox, "CLEAR", 14, 278, 112, 40, C_WARN, sms_clear_event);
+    lv_obj_t *inbox = make_panel(c, 264, 8, 302, 336, "SMS Characters");
+    snprintf(value, sizeof(value), "Addr: S%u%s", g_ui.state.last_sender,
+             g_ui.state.group_call ? " / group" : "");
+    make_label(inbox, value, 14, 44, &lv_font_montserrat_14, C_MUTED);
 
-    lv_obj_t *status = make_panel(c, 518, 8, 274, 336, "Data Status");
-    snprintf(value, sizeof(value), "%lu", (unsigned long)g_ui.state.packet_count);
-    make_row(status, 48, "Packets", value, C_TEXT);
-    make_row(status, 78, "Data rate", "300 bps", C_TEXT);
-    make_row(status, 108, "Mark", "1200 Hz", C_TEXT);
-    make_row(status, 138, "Space", "2200 Hz", C_TEXT);
-    make_row(status, 168, "Charset", "ASCII", C_OK);
-    make_row(status, 198, "Target", "My ID/Group", C_ACCENT);
-    make_row(status, 228, "CRC", "Required", C_WARN);
+    lv_obj_t *body = make_panel(inbox, 14, 76, 274, 236, NULL);
+    g_ui.label_sms_body = make_label(body,
+                                     g_ui.state.sms_text[0] ? g_ui.state.sms_text : "(waiting for PYNQ SMS)",
+                                     12, 12,
+                                     &lv_font_montserrat_18,
+                                     g_ui.state.sms_text[0] ? C_TEXT : C_MUTED);
+    lv_obj_set_width(g_ui.label_sms_body, 248);
+    lv_label_set_long_mode(g_ui.label_sms_body, LV_LABEL_LONG_WRAP);
+
+    lv_obj_t *log = make_panel(c, 574, 8, 218, 336, "PYNQ Log");
+    g_ui.label_pynq_status = make_label(log, "BOOT WAIT", 12, 42, &lv_font_montserrat_14, C_ACCENT);
+    lv_obj_set_width(g_ui.label_pynq_status, 194);
+    lv_label_set_long_mode(g_ui.label_pynq_status, LV_LABEL_LONG_CLIP);
+    g_ui.label_log = make_label(log, "waiting for PYNQ...", 12, 76, &lv_font_montserrat_14, C_TEXT);
+    lv_obj_set_width(g_ui.label_log, 194);
+    lv_label_set_long_mode(g_ui.label_log, LV_LABEL_LONG_WRAP);
+
+    update_pynq_labels();
 }
 
 static void render_setup(void)
@@ -848,6 +949,9 @@ void slave_ui_create(lv_obj_t *parent)
     g_ui.state.battery_mv = 7400U;
     g_ui.state.battery_percent = 84U;
     g_ui.state.last_sender = 0U;
+    snprintf(g_ui.state.pynq_status, sizeof(g_ui.state.pynq_status), "BOOT WAIT");
+    snprintf(g_ui.state.capture_state, sizeof(g_ui.state.capture_state), "IDLE");
+    snprintf(g_ui.state.test_result, sizeof(g_ui.state.test_result), "--");
     g_ui.state.wave_min = 0U;
     g_ui.state.wave_max = ADC_FULL_SCALE;
     g_ui.state.wave_avg = ADC_FULL_SCALE / 2U;
@@ -913,6 +1017,59 @@ void slave_ui_create(lv_obj_t *parent)
 
     lv_timer_create(timer_event, 250, NULL);
     render_page(PAGE_HOME);
+}
+
+void slave_ui_set_command_callback(void (*callback)(const char *command))
+{
+    g_command_callback = callback;
+}
+
+void slave_ui_set_pynq_status(const char *status)
+{
+    if (status == NULL) {
+        status = "";
+    }
+    snprintf(g_ui.state.pynq_status, sizeof(g_ui.state.pynq_status), "%s", status);
+    update_pynq_labels();
+}
+
+void slave_ui_set_test_result(const char *result)
+{
+    if (result == NULL) {
+        result = "";
+    }
+    snprintf(g_ui.state.test_result, sizeof(g_ui.state.test_result), "%s", result);
+    update_pynq_labels();
+}
+
+void slave_ui_set_capture_state(const char *state)
+{
+    if (state == NULL) {
+        state = "";
+    }
+    snprintf(g_ui.state.capture_state, sizeof(g_ui.state.capture_state), "%s", state);
+    update_pynq_labels();
+}
+
+void slave_ui_append_log(const char *line)
+{
+    if (line == NULL || line[0] == '\0') {
+        return;
+    }
+
+    if (g_ui.state.log_count < PYNQ_LOG_LINES) {
+        g_ui.state.log_count++;
+    } else {
+        memmove(g_ui.state.log_lines,
+                &g_ui.state.log_lines[1],
+                (PYNQ_LOG_LINES - 1U) * PYNQ_LOG_LINE_MAX);
+    }
+
+    snprintf(g_ui.state.log_lines[g_ui.state.log_count - 1U],
+             PYNQ_LOG_LINE_MAX,
+             "%s",
+             line);
+    update_pynq_labels();
 }
 
 void slave_ui_set_rx_state(bool carrier_detected,

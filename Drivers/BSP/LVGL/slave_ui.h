@@ -7,6 +7,12 @@
 
 void slave_ui_create(lv_obj_t *parent);
 
+void slave_ui_set_command_callback(void (*callback)(const char *command));
+void slave_ui_set_pynq_status(const char *status);
+void slave_ui_set_test_result(const char *result);
+void slave_ui_set_capture_state(const char *state);
+void slave_ui_append_log(const char *line);
+
 void slave_ui_set_rx_state(bool carrier_detected,
                            bool selected_call,
                            bool group_call,

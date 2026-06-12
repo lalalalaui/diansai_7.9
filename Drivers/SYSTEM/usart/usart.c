@@ -41,16 +41,11 @@
 int fputc(int ch, FILE *f)
 {
     (void)f;
-    while ((USART_UX->ISR & 0X40) == 0);
-
-    USART_UX->TDR = (uint8_t)ch;
     return ch;
 }
 
 int __io_putchar(int ch)
 {
-    while ((USART_UX->ISR & 0X40) == 0);
-    USART_UX->TDR = (uint8_t)ch;
     return ch;
 }
 #else
@@ -89,9 +84,6 @@ FILE __stdout;
 int fputc(int ch, FILE *f)
 {
     (void)f;
-    while ((USART_UX->ISR & 0X40) == 0);
-
-    USART_UX->TDR = (uint8_t)ch;
     return ch;
 }
 #endif

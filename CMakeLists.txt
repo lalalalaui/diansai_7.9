@@ -93,7 +93,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/SYSTEM/sys/sys.c
     Drivers/SYSTEM/usart/usart.c
     Drivers/BSP/24CXX/24cxx.c
-    Drivers/BSP/AFSK/afsk_demod.c
     Drivers/BSP/ADC/adc.c
     Drivers/BSP/FPGA/fpga_display.c
     Drivers/BSP/IIC/myiic.c
@@ -105,8 +104,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/BSP/LVGL/slave_ui.c
     Drivers/BSP/MPU/mpu.c
     Drivers/BSP/SDRAM/sdram.c
-    Drivers/BSP/SMS/crc8.c
-    Drivers/BSP/SMS/sms_frame.c
     Drivers/BSP/TOUCH/ctiic.c
     Drivers/BSP/TOUCH/ft5206.c
     Drivers/BSP/TOUCH/gt9xxx.c
@@ -128,7 +125,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/SYSTEM/sys
     Drivers/SYSTEM/usart
     Drivers/BSP/24CXX
-    Drivers/BSP/AFSK
     Drivers/BSP/ADC
     Drivers/BSP/FPGA
     Drivers/BSP/IIC
@@ -138,7 +134,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/BSP/LVGL
     Drivers/BSP/MPU
     Drivers/BSP/SDRAM
-    Drivers/BSP/SMS
     Drivers/BSP/TOUCH
     Middlewares
     Middlewares/lvgl

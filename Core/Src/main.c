@@ -18,33 +18,16 @@
 #include "./BSP/MPU/mpu.h"
 #include "./BSP/TOUCH/touch.h"
 #include "./BSP/ADC/adc.h"
-#include "./BSP/AFSK/afsk_demod.h"
 #include "./BSP/FPGA/fpga_display.h"
 #include "./BSP/LVGL/lvgl_port.h"
 #include "./BSP/LVGL/slave_ui.h"
-#include "./BSP/SMS/sms_frame.h"
 
 #define RGB565(r, g, b)   (uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xF8) << 3) | (((b) & 0xF8) >> 3))
 
 #define ADC_DMA_BUF_SIZE  80U
 #define ADC_VREF_MV       3300U
 #define ADC_FULL_SCALE    65535U
-#define AFSK_RX_SAMPLE_RATE_HZ 24000U
-#define AFSK_RX_BIT_BUF_SIZE  1024U
-#define AFSK_RX_PHASE_COUNT   16U
 #define UI_CARD_COUNT     8U
-
-#define AFSK_EDGE_GUARD_NUM     1U
-#define AFSK_EDGE_GUARD_DEN     6U
-
-#define AFSK_LOCK_CRC_FAIL_MAX  3U
-#define AFSK_LOCK_TIMEOUT_MS    5000U
-
-#define AFSK_DEBUG_CFG          1
-#define AFSK_DEBUG_STAT         1
-#define AFSK_DEBUG_PHASE        1
-#define AFSK_DEBUG_EVENT        1
-#define AFSK_DEBUG_PWR          1
 
 #define UI_BG             RGB565(22, 26, 32)
 #define UI_PANEL          RGB565(34, 42, 52)
@@ -91,69 +74,6 @@ uint32_t g_ui_fps = 0;
 static uint8_t g_led_div = 0;
 static uint16_t g_adc_dma_buf[ADC_DMA_BUF_SIZE] __attribute__((section(".dma_buffer"), aligned(32)));
 static uint16_t g_adc_proc_buf[ADC_DMA_BUF_SIZE] __attribute__((aligned(32)));
-static int16_t g_afsk_bit_buf[AFSK_RX_BIT_BUF_SIZE];
-static int16_t g_afsk_ring_buf[AFSK_RX_BIT_BUF_SIZE];
-static uint16_t g_afsk_samples_per_bit = 0U;
-static uint16_t g_afsk_phase_step = 1U;
-static uint16_t g_afsk_ring_pos = 0U;
-static uint16_t g_afsk_ring_count = 0U;
-static uint16_t g_afsk_decim_factor = 1U;
-static uint16_t g_afsk_decim_count = 0U;
-static uint32_t g_afsk_decim_sum = 0U;
-static uint32_t g_afsk_decim_total = 0U;
-static uint8_t g_sms_station_id = 0U;
-static sms_frame_t g_sms_rx_ctx[AFSK_RX_PHASE_COUNT];
-static char g_sms_rx_text[SMS_MAX_PAYLOAD_LEN + 1U];
-
-/* debug counters — reset every second */
-typedef struct {
-    uint32_t bits_0;
-    uint32_t bits_1;
-    uint32_t invalid;
-    uint32_t pre_hits;
-    uint32_t flag_hits;
-    uint32_t frame_ok;
-    uint32_t crc_fail;
-    uint32_t addr_drop;
-} phase_dbg_t;
-
-/* lock state — never cleared by stats print */
-typedef struct {
-    uint8_t  has_last_bit;
-    uint8_t  last_bit;
-    uint16_t same_count;
-    uint16_t alt_score;
-    uint16_t consecutive_fails;
-    uint8_t  stuck_flag;
-    uint8_t  sms_state;
-} phase_lock_t;
-
-static phase_dbg_t  g_ph_dbg[AFSK_RX_PHASE_COUNT];
-static phase_lock_t g_ph_lock[AFSK_RX_PHASE_COUNT];
-
-/* Goertzel power snapshot (last decode) */
-static float    g_last_e1200  = 0.0f;
-static float    g_last_e2200  = 0.0f;
-static uint32_t g_last_ratio_x100 = 0U;
-static uint8_t  g_last_bit    = 0;
-static uint8_t  g_last_phase  = 0;
-static bool     g_last_valid  = false;
-
-/* ADC raw diagnostic */
-static uint16_t g_adc_diag_min = 65535U;
-static uint16_t g_adc_diag_max = 0U;
-static uint64_t g_adc_diag_sum = 0U;
-static uint32_t g_adc_diag_cnt = 0U;
-
-/* dynamic DC removal (1st-order IIR, Q8) */
-static int32_t  g_adc_dc_q8 = 32768L << 8;
-
-/* phase-lock FSM */
-typedef enum { LOCK_SEARCHING = 0, LOCK_LOCKED } lock_state_t;
-static lock_state_t g_lock_state   = LOCK_SEARCHING;
-static uint8_t      g_locked_phase = 0;
-static uint32_t     g_lock_crc_fails        = 0;
-static uint32_t     g_lock_last_progress_ms = 0;
 
 static const uint16_t POINT_COLOR_TBL[10] =
 {
@@ -165,13 +85,6 @@ static void ui_draw_page(void);
 static void ui_draw_draw_area(void);
 static void ui_update_metrics(uint8_t points, uint16_t x, uint16_t y, uint8_t key);
 static void adc_dma_service(void);
-static void afsk_sms_init(void) __attribute__((unused));
-static void afsk_sms_reset_parsers(void);
-static void afsk_sms_process_samples(const uint16_t *samples, uint16_t count) __attribute__((unused));
-static void afsk_sms_process_decimated_sample(uint16_t raw);
-static bool afsk_decode_bit_with_pwr(const int16_t *samples, uint16_t count,
-                                      uint8_t *bit, uint8_t phase);
-static void afsk_debug_print_stats(void) __attribute__((unused));
 static uint16_t ui_metric_cols(void);
 static void ui_button(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const char *text, uint16_t bg, uint16_t fg);
 static void ui_card(uint8_t index, const char *label);
@@ -436,6 +349,7 @@ static void adc_dma_service(void)
     slave_ui_set_waveform(g_adc_proc_buf, count);
 }
 
+#if 0 /* ---- Local AFSK/SMS removed; PYNQ handles decoding via UART ---- */
 static void afsk_sms_init(void)
 {
     uint32_t adc_sample_rate = adc_dma_get_sample_rate_hz();
@@ -891,6 +805,7 @@ static void afsk_debug_print_stats(void)
     /* clear debug counters only (lock state untouched!) */
     memset(g_ph_dbg, 0, sizeof(g_ph_dbg));
 }
+#endif /* #if 0 — AFSK/SMS removed */
 
 static uint8_t ui_in_rect(uint16_t x, uint16_t y, uint16_t rx, uint16_t ry, uint16_t rw, uint16_t rh)
 {
