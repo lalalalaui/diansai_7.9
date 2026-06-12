@@ -19,6 +19,7 @@
 #include "./BSP/TOUCH/touch.h"
 #include "./BSP/ADC/adc.h"
 #include "./BSP/AFSK/afsk_demod.h"
+#include "./BSP/FPGA/fpga_display.h"
 #include "./BSP/LVGL/lvgl_port.h"
 #include "./BSP/LVGL/slave_ui.h"
 #include "./BSP/SMS/sms_frame.h"
@@ -164,13 +165,13 @@ static void ui_draw_page(void);
 static void ui_draw_draw_area(void);
 static void ui_update_metrics(uint8_t points, uint16_t x, uint16_t y, uint8_t key);
 static void adc_dma_service(void);
-static void afsk_sms_init(void);
+static void afsk_sms_init(void) __attribute__((unused));
 static void afsk_sms_reset_parsers(void);
-static void afsk_sms_process_samples(const uint16_t *samples, uint16_t count);
+static void afsk_sms_process_samples(const uint16_t *samples, uint16_t count) __attribute__((unused));
 static void afsk_sms_process_decimated_sample(uint16_t raw);
 static bool afsk_decode_bit_with_pwr(const int16_t *samples, uint16_t count,
                                       uint8_t *bit, uint8_t phase);
-static void afsk_debug_print_stats(void);
+static void afsk_debug_print_stats(void) __attribute__((unused));
 static uint16_t ui_metric_cols(void);
 static void ui_button(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const char *text, uint16_t bg, uint16_t fg);
 static void ui_card(uint8_t index, const char *label);
@@ -433,7 +434,6 @@ static void adc_dma_service(void)
     g_adc_mv = (uint32_t)(((uint64_t)g_adc_raw * ADC_VREF_MV + (ADC_FULL_SCALE / 2U)) / ADC_FULL_SCALE);
     g_adc_samples++;
     slave_ui_set_waveform(g_adc_proc_buf, count);
-    afsk_sms_process_samples(g_adc_proc_buf, count);
 }
 
 static void afsk_sms_init(void)
@@ -1164,7 +1164,7 @@ int main(void)
     adc_dma_enable(ADC_DMA_BUF_SIZE);
     lvgl_port_init();
     lvgl_port_demo_create();
-    afsk_sms_init();
+    FPGA_DisplayInit();
 
     while (1)
     {
@@ -1173,8 +1173,8 @@ int main(void)
         uint32_t now = HAL_GetTick();
 
         adc_dma_service();
+        FPGA_DisplayPollUsart1();
         lv_timer_handler();
-        afsk_debug_print_stats();
 
         /* FPS counting */
         frame_cnt++;

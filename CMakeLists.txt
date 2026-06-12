@@ -95,6 +95,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/BSP/24CXX/24cxx.c
     Drivers/BSP/AFSK/afsk_demod.c
     Drivers/BSP/ADC/adc.c
+    Drivers/BSP/FPGA/fpga_display.c
     Drivers/BSP/IIC/myiic.c
     Drivers/BSP/KEY/key.c
     Drivers/BSP/LCD/lcd.c
@@ -129,6 +130,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/BSP/24CXX
     Drivers/BSP/AFSK
     Drivers/BSP/ADC
+    Drivers/BSP/FPGA
     Drivers/BSP/IIC
     Drivers/BSP/KEY
     Drivers/BSP/LCD
