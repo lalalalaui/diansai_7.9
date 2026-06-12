@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define FPGA_DISPLAY_LINE_MAX      160U
+#define FPGA_DISPLAY_LINE_MAX      256U
 #define FPGA_DISPLAY_TEXT_MAX      96U
 
 typedef enum

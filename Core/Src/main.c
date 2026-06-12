@@ -1061,7 +1061,6 @@ static void lcd_draw_bline(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, u
         }
     }
 }
-
 int main(void)
 {
     sys_cache_enable();

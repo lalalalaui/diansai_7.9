@@ -678,21 +678,9 @@ void FPGA_DisplayPollUsart1(void)
     char line[FPGA_DISPLAY_LINE_MAX];
     uint16_t len;
 
-    if ((g_usart_rx_sta & 0x8000U) == 0U)
+    len = usart_read_line((uint8_t *)line, (uint16_t)sizeof(line));
+    if (len > 0U)
     {
-        return;
+        (void)FPGA_DisplayProcessLine(line);
     }
-
-    __disable_irq();
-    len = g_usart_rx_sta & 0x3FFFU;
-    if (len >= FPGA_DISPLAY_LINE_MAX)
-    {
-        len = FPGA_DISPLAY_LINE_MAX - 1U;
-    }
-    memcpy(line, g_usart_rx_buf, len);
-    line[len] = '\0';
-    g_usart_rx_sta = 0U;
-    __enable_irq();
-
-    (void)FPGA_DisplayProcessLine(line);
 }

@@ -13,7 +13,7 @@
  * ������Ƶ:www.yuanzige.com
  * ������̳:www.openedv.com
  * ��˾��ַ:www.alientek.com
- * �����ַ:openedv.taobao.com
+ * ������?openedv.taobao.com
  *
  * �޸�˵��
  * V1.0 20220420
@@ -27,6 +27,9 @@
 
 #include "./SYSTEM/sys/sys.h"
 #include "./SYSTEM/usart/usart.h"
+
+#include <stdbool.h>
+#include <string.h>
 
 
 /* ���ʹ��os,����������ͷ�ļ�����. */
@@ -89,13 +92,13 @@ int fputc(int ch, FILE *f)
 #endif
 /******************************************************************************************/
 
-#if USART_EN_RX     /* ���ʹ���˽��� */
+#if USART_EN_RX     /* ���ʹ���˽���?*/
 
 /* ���ջ���, ���USART_REC_LEN���ֽ�. */
 uint8_t g_usart_rx_buf[USART_REC_LEN];
 
 /*  ����״̬
- *  bit15��      ������ɱ�־
+ *  bit15��      ������ɱ��?
  *  bit14��      ���յ�0x0d
  *  bit13~0��    ���յ�����Ч�ֽ���Ŀ
 */
@@ -103,7 +106,75 @@ uint16_t g_usart_rx_sta = 0;
 
 uint8_t g_rx_buffer[RXBUFFERSIZE];          /* HAL��ʹ�õĴ��ڽ��ջ��� */
 
-UART_HandleTypeDef g_uart1_handle;          /* UART��� */
+UART_HandleTypeDef g_uart1_handle;          /* UART���?*/
+
+static uint8_t s_usart_rx_line[USART_REC_LEN];
+static uint16_t s_usart_rx_len = 0U;
+static bool s_usart_rx_cr_seen = false;
+
+static uint8_t s_usart_line_queue[USART_LINE_QUEUE_DEPTH][USART_REC_LEN];
+static volatile uint16_t s_usart_line_len[USART_LINE_QUEUE_DEPTH];
+static volatile uint8_t s_usart_line_head = 0U;
+static volatile uint8_t s_usart_line_tail = 0U;
+static volatile uint8_t s_usart_line_count = 0U;
+static volatile uint32_t s_usart_line_overflow = 0U;
+
+static void usart_queue_current_line(void)
+{
+    uint8_t head;
+
+    if (s_usart_rx_len == 0U)
+    {
+        return;
+    }
+
+    if (s_usart_line_count >= USART_LINE_QUEUE_DEPTH)
+    {
+        s_usart_line_tail = (uint8_t)((s_usart_line_tail + 1U) % USART_LINE_QUEUE_DEPTH);
+        s_usart_line_count--;
+        s_usart_line_overflow++;
+    }
+
+    head = s_usart_line_head;
+    memcpy(s_usart_line_queue[head], s_usart_rx_line, s_usart_rx_len);
+    s_usart_line_len[head] = s_usart_rx_len;
+    s_usart_line_head = (uint8_t)((s_usart_line_head + 1U) % USART_LINE_QUEUE_DEPTH);
+    s_usart_line_count++;
+}
+
+uint16_t usart_read_line(uint8_t *buf, uint16_t buf_size)
+{
+    uint16_t len;
+    uint8_t tail;
+
+    if (buf == NULL || buf_size == 0U)
+    {
+        return 0U;
+    }
+
+    __disable_irq();
+    if (s_usart_line_count == 0U)
+    {
+        __enable_irq();
+        buf[0] = '\0';
+        return 0U;
+    }
+
+    tail = s_usart_line_tail;
+    len = s_usart_line_len[tail];
+    if (len >= buf_size)
+    {
+        len = (uint16_t)(buf_size - 1U);
+    }
+    memcpy(buf, s_usart_line_queue[tail], len);
+    buf[len] = '\0';
+
+    s_usart_line_tail = (uint8_t)((s_usart_line_tail + 1U) % USART_LINE_QUEUE_DEPTH);
+    s_usart_line_count--;
+    __enable_irq();
+
+    return len;
+}
 
 
 /**
@@ -129,16 +200,16 @@ void usart_init(uint32_t baudrate)
 }
 
 /**
- * @brief       UART�ײ��ʼ������
- * @param       huart: UART�������ָ��
+ * @brief       UART�ײ��ʼ������?
+ * @param       huart: UART�������ָ��?
  * @note        �˺����ᱻHAL_UART_Init()����
- *              ���ʱ��ʹ�ܣ��������ã��ж�����
+ *              ���ʱ��ʹ�ܣ��������ã��ж�����?
  * @retval      ��
  */
 void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 {
     GPIO_InitTypeDef gpio_init_struct;
-    if (huart->Instance == USART_UX)                                /* ����Ǵ���1�����д���1 MSP��ʼ�� */
+    if (huart->Instance == USART_UX)                                /* ����Ǵ���?�����д���1 MSP��ʼ�� */
     {
         USART_UX_CLK_ENABLE();                                      /* USART1 ʱ��ʹ�� */
         USART_TX_GPIO_CLK_ENABLE();                                 /* ��������ʱ��ʹ�� */
@@ -163,48 +234,51 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 }
 
 /**
- * @brief       Rx����ص�����
- * @param       huart: UART�������ָ��
+ * @brief       Rx����ص�����?
+ * @param       huart: UART�������ָ��?
  * @retval      ��
  */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    if (huart->Instance == USART1)                             /* ����Ǵ���1 */
+    if (huart->Instance == USART1)
     {
-        if ((g_usart_rx_sta & 0x8000) == 0)                    /* ����δ��� */
+        uint8_t ch = g_rx_buffer[0];
+
+        if (ch == '\r')
         {
-            if (g_usart_rx_sta & 0x4000)                       /* ���յ���0x0d */
+            s_usart_rx_cr_seen = true;
+        }
+        else if (ch == '\n')
+        {
+            usart_queue_current_line();
+            s_usart_rx_len = 0U;
+            s_usart_rx_cr_seen = false;
+            g_usart_rx_sta = 0U;
+        }
+        else
+        {
+            if (s_usart_rx_cr_seen)
             {
-                if (g_rx_buffer[0] != 0x0a) 
-                {
-                    g_usart_rx_sta = 0;                       /* ���մ���,���¿�ʼ */
-                }
-                else 
-                {
-                    g_usart_rx_sta |= 0x8000;                 /* ��������� */
-                }
+                usart_queue_current_line();
+                s_usart_rx_len = 0U;
+                s_usart_rx_cr_seen = false;
             }
-            else                                              /* ��û�յ�0X0D */
+
+            if (s_usart_rx_len < (USART_REC_LEN - 1U))
             {
-                if(g_rx_buffer[0] == 0x0d)
-                {
-                    g_usart_rx_sta |= 0x4000;
-                }
-                else
-                {
-                    g_usart_rx_buf[g_usart_rx_sta & 0X3FFF] = g_rx_buffer[0] ;
-                    g_usart_rx_sta++;
-                    if(g_usart_rx_sta > (USART_REC_LEN - 1))
-                    {
-                        g_usart_rx_sta = 0;                   /* �������ݴ���,���¿�ʼ���� */
-                    }
-                }
+                s_usart_rx_line[s_usart_rx_len++] = ch;
+                g_usart_rx_buf[g_usart_rx_sta & 0x3FFFU] = ch;
+                g_usart_rx_sta = s_usart_rx_len;
+            }
+            else
+            {
+                s_usart_rx_len = 0U;
+                g_usart_rx_sta = 0U;
             }
         }
         HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t *)g_rx_buffer, RXBUFFERSIZE);
     }
 }
-
 /**
  * @brief       ����1�жϷ�����
  * @param       ��

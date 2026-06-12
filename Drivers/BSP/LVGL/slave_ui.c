@@ -7,9 +7,9 @@
 
 #define SLAVE_STATION_COUNT       8U
 #define SMS_TEXT_MAX              96U
-#define PYNQ_TEXT_MAX             96U
+#define PYNQ_TEXT_MAX             128U
 #define PYNQ_LOG_LINES            20U
-#define PYNQ_LOG_LINE_MAX         96U
+#define PYNQ_LOG_LINE_MAX         160U
 #define WAVE_POINT_COUNT          160U
 #define ADC_REF_MV                3300U
 #define ADC_FULL_SCALE            65535U

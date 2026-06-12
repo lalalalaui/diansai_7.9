@@ -50,7 +50,8 @@
 #define USART_UX_IRQHandler             USART1_IRQHandler
 #define USART_UX_CLK_ENABLE()           do{ __HAL_RCC_USART1_CLK_ENABLE(); }while(0)  /* USART1 时钟使能 */
 
-#define USART_REC_LEN   200                     /* 定义最大接收字节数 200 */
+#define USART_REC_LEN   256                     /* 单行最大接收字节数 */
+#define USART_LINE_QUEUE_DEPTH 16                /* 完整行队列深度 */
 #define USART_EN_RX     1                       /* 使能（1）/禁止（0）串口1接收 */
 #define RXBUFFERSIZE    1                       /* 缓存大小 */
 
@@ -63,6 +64,7 @@ extern uint8_t g_rx_buffer[RXBUFFERSIZE];       /* HAL库USART接收Buffer */
 /*******************************************************************************************************/
 
 void usart_init(uint32_t baudrate);             /* 串口初始化函数 */
+uint16_t usart_read_line(uint8_t *buf, uint16_t buf_size);
 
 #endif
 
