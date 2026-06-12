@@ -1148,6 +1148,10 @@ void slave_ui_set_sms(const char *text, uint8_t sender_id, bool group_call)
     g_ui.state.packet_count++;
     g_ui.state.carrier_detected = true;
     g_ui.state.selected_call = true;
+
+    /* Visible feedback: update capture_state so user knows SMS was received */
+    snprintf(g_ui.state.capture_state, sizeof(g_ui.state.capture_state),
+             "SMS rcvd S%u", sender_id == 0xFFU ? 0U : sender_id);
     update_top();
 
     /* Refresh current page so SMS appears immediately on any page */
