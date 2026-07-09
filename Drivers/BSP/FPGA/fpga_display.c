@@ -1,5 +1,6 @@
 #include "./BSP/FPGA/fpga_display.h"
 #include "./BSP/LVGL/slave_ui.h"
+#include "./BSP/WIRELESS/wireless_control.h"
 #include "./SYSTEM/usart/usart.h"
 
 #include <ctype.h>
@@ -14,7 +15,7 @@ static uint32_t g_fpga_log_lines = 0U;
 
 static void fpga_send_command(const char *command)
 {
-    char line[24];
+    char line[WIRELESS_CMD_MAX_LEN];
     int len;
 
     if (command == NULL) {

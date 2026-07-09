@@ -102,12 +102,14 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/BSP/LED/led.c
     Drivers/BSP/LVGL/lvgl_port.c
     Drivers/BSP/LVGL/slave_ui.c
+    Drivers/BSP/LVGL/ui_font_cn_18.c
     Drivers/BSP/MPU/mpu.c
     Drivers/BSP/SDRAM/sdram.c
     Drivers/BSP/TOUCH/ctiic.c
     Drivers/BSP/TOUCH/ft5206.c
     Drivers/BSP/TOUCH/gt9xxx.c
     Drivers/BSP/TOUCH/touch.c
+    Drivers/BSP/WIRELESS/wireless_control.c
     Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_dma2d.c
     Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_ltdc.c
     Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_ltdc_ex.c
@@ -135,6 +137,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/BSP/MPU
     Drivers/BSP/SDRAM
     Drivers/BSP/TOUCH
+    Drivers/BSP/WIRELESS
     Middlewares
     Middlewares/lvgl
 )

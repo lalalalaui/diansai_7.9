@@ -24,5 +24,6 @@ void slave_ui_set_waveform(const uint16_t *samples, uint16_t count);
 
 uint8_t slave_ui_get_station_id(void);
 bool slave_ui_group_enabled(void);
+void slave_ui_send_command(const char *command);
 
 #endif
