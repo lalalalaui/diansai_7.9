@@ -74,7 +74,7 @@ static lv_obj_t *g_auto_label;
 static lv_obj_t *g_input_overlay;
 static lv_obj_t *g_input_value_label;
 static ui_field_t g_input_field = UI_FIELD_NONE;
-static char g_input_buf[8];
+static char g_input_buf[11];
 
 static lv_style_t g_style_root;
 static lv_style_t g_style_panel;
@@ -83,6 +83,12 @@ static lv_style_t g_style_btn_primary;
 static lv_style_t g_style_label;
 
 static lv_obj_t *ui_make_label(lv_obj_t *parent, const char *text);
+
+static void ui_disable_scroll(lv_obj_t *obj)
+{
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(obj, LV_SCROLLBAR_MODE_OFF);
+}
 
 static const char *g_keypad_map[] = {
     "1", "2", "3", "\n",
@@ -151,28 +157,28 @@ static void ui_field_set_value(ui_field_t field, uint32_t value)
     switch (field)
     {
         case UI_FIELD_FC:
-            cfg.fc_mhz = (uint8_t)value;
+            cfg.fc_mhz = value;
             break;
         case UI_FIELD_SD_MV:
-            cfg.sd_mv = (uint16_t)value;
+            cfg.sd_mv = value;
             break;
         case UI_FIELD_SD_PHASE:
-            cfg.sd_phase_deg = (uint16_t)value;
+            cfg.sd_phase_deg = value;
             break;
         case UI_FIELD_AM_DEPTH:
-            cfg.am_depth_pct = (uint8_t)value;
+            cfg.am_depth_pct = value;
             break;
         case UI_FIELD_SM_DELAY:
-            cfg.sm_delay_ns = (uint16_t)value;
+            cfg.sm_delay_ns = value;
             break;
         case UI_FIELD_SM_PHASE:
-            cfg.sm_phase_deg = (uint16_t)value;
+            cfg.sm_phase_deg = value;
             break;
         case UI_FIELD_SM_ATTEN:
-            cfg.sm_atten_db = (uint8_t)value;
+            cfg.sm_atten_db = value;
             break;
         case UI_FIELD_SQUARE:
-            cfg.square_khz = (uint16_t)value;
+            cfg.square_khz = value;
             break;
         default:
             return;
@@ -200,30 +206,30 @@ static void ui_refresh(void)
     const wireless_config_t *cfg = Wireless_ControlGet();
     char buf[WIRELESS_CMD_MAX_LEN];
 
-    snprintf(buf, sizeof(buf), "%u MHz", cfg->fc_mhz);
+    snprintf(buf, sizeof(buf), "%lu MHz", (unsigned long)cfg->fc_mhz);
     ui_set_text(g_value_fc, buf);
 
     ui_set_text(g_value_mode, Wireless_ModeName(cfg->mode));
 
-    snprintf(buf, sizeof(buf), "%u mVrms", cfg->sd_mv);
+    snprintf(buf, sizeof(buf), "%lu mVrms", (unsigned long)cfg->sd_mv);
     ui_set_text(g_value_sd_mv, buf);
 
-    snprintf(buf, sizeof(buf), "%u deg", cfg->sd_phase_deg);
+    snprintf(buf, sizeof(buf), "%lu deg", (unsigned long)cfg->sd_phase_deg);
     ui_set_text(g_value_sd_phase, buf);
 
-    snprintf(buf, sizeof(buf), "%u %%", cfg->am_depth_pct);
+    snprintf(buf, sizeof(buf), "%lu %%", (unsigned long)cfg->am_depth_pct);
     ui_set_text(g_value_am_depth, buf);
 
-    snprintf(buf, sizeof(buf), "%u ns", cfg->sm_delay_ns);
+    snprintf(buf, sizeof(buf), "%lu ns", (unsigned long)cfg->sm_delay_ns);
     ui_set_text(g_value_sm_delay, buf);
 
-    snprintf(buf, sizeof(buf), "%u deg", cfg->sm_phase_deg);
+    snprintf(buf, sizeof(buf), "%lu deg", (unsigned long)cfg->sm_phase_deg);
     ui_set_text(g_value_sm_phase, buf);
 
-    snprintf(buf, sizeof(buf), "%u dB", cfg->sm_atten_db);
+    snprintf(buf, sizeof(buf), "%lu dB", (unsigned long)cfg->sm_atten_db);
     ui_set_text(g_value_sm_atten, buf);
 
-    snprintf(buf, sizeof(buf), "%u kHz", cfg->square_khz);
+    snprintf(buf, sizeof(buf), "%lu kHz", (unsigned long)cfg->square_khz);
     ui_set_text(g_value_square, buf);
 
     ui_set_text(g_value_out_a, Wireless_OutputName(cfg->out_a));
@@ -350,7 +356,7 @@ static void ui_value_click_event(lv_event_t *e)
     lv_obj_set_style_bg_opa(g_input_overlay, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(g_input_overlay, 0, 0);
     lv_obj_set_style_pad_all(g_input_overlay, 10, 0);
-    lv_obj_clear_flag(g_input_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    ui_disable_scroll(g_input_overlay);
 
     panel = lv_obj_create(g_input_overlay);
     lv_obj_set_size(panel, 780, 130);
@@ -534,7 +540,6 @@ static lv_obj_t *ui_make_button(lv_obj_t *parent, const char *text, ui_action_t 
 
 static lv_obj_t *ui_make_row(lv_obj_t *parent,
                              const char *name,
-                             const char *unit_hint,
                              ui_action_t dec_action,
                              ui_action_t inc_action,
                              ui_field_t field)
@@ -544,6 +549,7 @@ static lv_obj_t *ui_make_row(lv_obj_t *parent,
     lv_obj_set_style_border_width(row, 0, 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(row, 0, 0);
+    ui_disable_scroll(row);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -571,9 +577,6 @@ static lv_obj_t *ui_make_row(lv_obj_t *parent,
 
     ui_make_button(row, "+", inc_action, false);
 
-    lv_obj_t *hint = ui_make_label(row, unit_hint);
-    lv_obj_set_width(hint, 96);
-    lv_obj_set_style_text_color(hint, lv_color_hex(0x718096), 0);
     return value;
 }
 
@@ -582,6 +585,7 @@ static lv_obj_t *ui_make_panel(lv_obj_t *parent, const char *title)
     lv_obj_t *panel = lv_obj_create(parent);
     lv_obj_add_style(panel, &g_style_panel, 0);
     lv_obj_set_size(panel, 380, 326);
+    ui_disable_scroll(panel);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
@@ -638,7 +642,7 @@ void slave_ui_create(lv_obj_t *parent)
 
     lv_obj_clean(parent);
     lv_obj_add_style(parent, &g_style_root, 0);
-    lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
+    ui_disable_scroll(parent);
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(parent, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
@@ -647,6 +651,7 @@ void slave_ui_create(lv_obj_t *parent)
     lv_obj_set_style_border_width(header, 0, 0);
     lv_obj_set_style_bg_opa(header, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(header, 0, 0);
+    ui_disable_scroll(header);
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -661,17 +666,19 @@ void slave_ui_create(lv_obj_t *parent)
     lv_obj_set_style_border_width(main_row, 0, 0);
     lv_obj_set_style_bg_opa(main_row, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(main_row, 0, 0);
+    ui_disable_scroll(main_row);
     lv_obj_set_flex_flow(main_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(main_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
     panel_left = ui_make_panel(main_row, "\xE7\x9B\xB4\xE8\xBE\xBE\xE4\xBF\xA1\xE5\x8F\xB7\x20\x53\x44");
-    g_value_fc = ui_make_row(panel_left, "\xE8\xBD\xBD\xE6\xB3\xA2", "30-40 MHz / 1", UI_ACT_FC_DEC, UI_ACT_FC_INC, UI_FIELD_FC);
+    g_value_fc = ui_make_row(panel_left, "\xE8\xBD\xBD\xE6\xB3\xA2", UI_ACT_FC_DEC, UI_ACT_FC_INC, UI_FIELD_FC);
 
     lv_obj_t *mode_row = lv_obj_create(panel_left);
     lv_obj_set_size(mode_row, LV_PCT(100), 40);
     lv_obj_set_style_border_width(mode_row, 0, 0);
     lv_obj_set_style_bg_opa(mode_row, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(mode_row, 0, 0);
+    ui_disable_scroll(mode_row);
     lv_obj_set_flex_flow(mode_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(mode_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *mode_name = ui_make_label(mode_row, "\xE4\xBF\xA1\xE5\x8F\xB7\xE6\xA8\xA1\xE5\xBC\x8F");
@@ -680,24 +687,22 @@ void slave_ui_create(lv_obj_t *parent)
     g_value_mode = ui_make_label(mode_row, "--");
     lv_obj_set_width(g_value_mode, 92);
     lv_obj_set_style_text_align(g_value_mode, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_t *mode_hint = ui_make_label(mode_row, "CW / AM");
-    lv_obj_set_style_text_color(mode_hint, lv_color_hex(0x718096), 0);
-
-    g_value_sd_mv = ui_make_row(panel_left, "\x53\x44\x20\xE5\xB9\x85\xE5\xBA\xA6", "100mV-1V / 100", UI_ACT_SD_MV_DEC, UI_ACT_SD_MV_INC, UI_FIELD_SD_MV);
-    g_value_sd_phase = ui_make_row(panel_left, "\x53\x44\x20\xE5\x88\x9D\xE7\x9B\xB8", "0-330 deg / 30", UI_ACT_SD_PHASE_DEC, UI_ACT_SD_PHASE_INC, UI_FIELD_SD_PHASE);
-    g_value_am_depth = ui_make_row(panel_left, "\x41\x4D\x20\xE8\xB0\x83\xE5\x88\xB6\xE5\xBA\xA6", "30%-90% / 10", UI_ACT_AM_DEPTH_DEC, UI_ACT_AM_DEPTH_INC, UI_FIELD_AM_DEPTH);
+    g_value_sd_mv = ui_make_row(panel_left, "\x53\x44\x20\xE5\xB9\x85\xE5\xBA\xA6", UI_ACT_SD_MV_DEC, UI_ACT_SD_MV_INC, UI_FIELD_SD_MV);
+    g_value_sd_phase = ui_make_row(panel_left, "\x53\x44\x20\xE5\x88\x9D\xE7\x9B\xB8", UI_ACT_SD_PHASE_DEC, UI_ACT_SD_PHASE_INC, UI_FIELD_SD_PHASE);
+    g_value_am_depth = ui_make_row(panel_left, "\x41\x4D\x20\xE8\xB0\x83\xE5\x88\xB6\xE5\xBA\xA6", UI_ACT_AM_DEPTH_DEC, UI_ACT_AM_DEPTH_INC, UI_FIELD_AM_DEPTH);
 
     panel_right = ui_make_panel(main_row, "\xE5\xA4\x9A\xE5\xBE\x84\xE4\xB8\x8E\xE8\xBE\x93\xE5\x87\xBA");
-    g_value_sm_delay = ui_make_row(panel_right, "\x53\x4D\x20\xE6\x97\xB6\xE5\xBB\xB6", "50-200 ns / 30", UI_ACT_SM_DELAY_DEC, UI_ACT_SM_DELAY_INC, UI_FIELD_SM_DELAY);
-    g_value_sm_phase = ui_make_row(panel_right, "\x53\x4D\x20\xE5\x88\x9D\xE7\x9B\xB8", "0-180 deg / 30", UI_ACT_SM_PHASE_DEC, UI_ACT_SM_PHASE_INC, UI_FIELD_SM_PHASE);
-    g_value_sm_atten = ui_make_row(panel_right, "\x53\x4D\x20\xE8\xA1\xB0\xE5\x87\x8F", "0-20 dB / 2", UI_ACT_SM_ATTEN_DEC, UI_ACT_SM_ATTEN_INC, UI_FIELD_SM_ATTEN);
-    g_value_square = ui_make_row(panel_right, "\xE6\x96\xB9\xE6\xB3\xA2", "100-5000 kHz", UI_ACT_SQUARE_DEC, UI_ACT_SQUARE_INC, UI_FIELD_SQUARE);
-    g_value_out_a = ui_make_row(panel_right, "DAC A", "SD/SM/SOUT/DC/SQ/MOD", UI_ACT_OUT_A_DEC, UI_ACT_OUT_A_INC, UI_FIELD_NONE);
-    g_value_out_b = ui_make_row(panel_right, "DAC B", "SD/SM/SOUT/DC/SQ/MOD", UI_ACT_OUT_B_DEC, UI_ACT_OUT_B_INC, UI_FIELD_NONE);
+    g_value_sm_delay = ui_make_row(panel_right, "\x53\x4D\x20\xE6\x97\xB6\xE5\xBB\xB6", UI_ACT_SM_DELAY_DEC, UI_ACT_SM_DELAY_INC, UI_FIELD_SM_DELAY);
+    g_value_sm_phase = ui_make_row(panel_right, "\x53\x4D\x20\xE5\x88\x9D\xE7\x9B\xB8", UI_ACT_SM_PHASE_DEC, UI_ACT_SM_PHASE_INC, UI_FIELD_SM_PHASE);
+    g_value_sm_atten = ui_make_row(panel_right, "\x53\x4D\x20\xE8\xA1\xB0\xE5\x87\x8F", UI_ACT_SM_ATTEN_DEC, UI_ACT_SM_ATTEN_INC, UI_FIELD_SM_ATTEN);
+    g_value_square = ui_make_row(panel_right, "\xE6\x96\xB9\xE6\xB3\xA2", UI_ACT_SQUARE_DEC, UI_ACT_SQUARE_INC, UI_FIELD_SQUARE);
+    g_value_out_a = ui_make_row(panel_right, "DAC A", UI_ACT_OUT_A_DEC, UI_ACT_OUT_A_INC, UI_FIELD_NONE);
+    g_value_out_b = ui_make_row(panel_right, "DAC B", UI_ACT_OUT_B_DEC, UI_ACT_OUT_B_INC, UI_FIELD_NONE);
 
     bottom = lv_obj_create(parent);
     lv_obj_add_style(bottom, &g_style_panel, 0);
     lv_obj_set_size(bottom, LV_PCT(100), 70);
+    ui_disable_scroll(bottom);
     lv_obj_set_flex_flow(bottom, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bottom, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -711,7 +716,7 @@ void slave_ui_create(lv_obj_t *parent)
 
     g_cmd_label = ui_make_label(bottom, "");
     lv_obj_set_width(g_cmd_label, 310);
-    lv_label_set_long_mode(g_cmd_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(g_cmd_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(g_cmd_label, lv_color_hex(0x475569), 0);
 
     ui_refresh();

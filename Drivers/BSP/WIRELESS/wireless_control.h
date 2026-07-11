@@ -27,15 +27,15 @@ typedef enum
 
 typedef struct
 {
-    uint8_t fc_mhz;             /* 30..40 MHz, step 1 MHz */
+    uint32_t fc_mhz;            /* MHz, step 1 MHz */
     wireless_mode_t mode;       /* CW/AM */
-    uint16_t sd_mv;             /* 100..1000 mVrms, step 100 mV */
-    uint16_t sd_phase_deg;      /* 0..330 deg, step 30 deg */
-    uint8_t am_depth_pct;       /* 30..90 %, step 10 % */
-    uint16_t sm_delay_ns;       /* 50..200 ns, step 30 ns */
-    uint16_t sm_phase_deg;      /* 0..180 deg, step 30 deg */
-    uint8_t sm_atten_db;        /* 0..20 dB, step 2 dB */
-    uint16_t square_khz;        /* 100..5000 kHz, step 100 kHz */
+    uint32_t sd_mv;             /* mVrms, step 100 mV */
+    uint32_t sd_phase_deg;      /* deg, step 30 deg */
+    uint32_t am_depth_pct;      /* %, step 10 % */
+    uint32_t sm_delay_ns;       /* ns, step 30 ns */
+    uint32_t sm_phase_deg;      /* deg, step 30 deg */
+    uint32_t sm_atten_db;       /* dB, step 2 dB */
+    uint32_t square_khz;        /* kHz, step 100 kHz */
     wireless_output_t out_a;    /* DAC A output select */
     wireless_output_t out_b;    /* DAC B output select */
     uint8_t auto_send;          /* send current params on boot */

@@ -8,7 +8,7 @@
 
 #define WIRELESS_NVS_ADDR       0U
 #define WIRELESS_NVS_MAGIC      0x57434647UL /* WCFG */
-#define WIRELESS_NVS_VERSION    2U
+#define WIRELESS_NVS_VERSION    3U
 
 typedef struct
 {
@@ -51,35 +51,6 @@ static uint32_t wireless_checksum(const uint8_t *data, uint16_t len)
     return h;
 }
 
-static uint16_t wireless_clamp_u16(uint16_t v, uint16_t min_v, uint16_t max_v)
-{
-    if (v < min_v)
-    {
-        return min_v;
-    }
-    if (v > max_v)
-    {
-        return max_v;
-    }
-    return v;
-}
-
-static uint16_t wireless_snap_u16(uint16_t v, uint16_t min_v, uint16_t max_v, uint16_t step)
-{
-    uint32_t n;
-
-    v = wireless_clamp_u16(v, min_v, max_v);
-    n = ((uint32_t)(v - min_v) + (step / 2U)) / step;
-    v = (uint16_t)(min_v + (n * step));
-    return wireless_clamp_u16(v, min_v, max_v);
-}
-
-static uint8_t wireless_snap_u8(uint8_t v, uint8_t min_v, uint8_t max_v, uint8_t step)
-{
-    uint16_t snapped = wireless_snap_u16(v, min_v, max_v, step);
-    return (uint8_t)snapped;
-}
-
 static void wireless_normalize(wireless_config_t *cfg)
 {
     if (cfg == NULL)
@@ -87,15 +58,7 @@ static void wireless_normalize(wireless_config_t *cfg)
         return;
     }
 
-    cfg->fc_mhz = wireless_snap_u8(cfg->fc_mhz, 30U, 40U, 1U);
     cfg->mode = (cfg->mode == WIRELESS_MODE_AM) ? WIRELESS_MODE_AM : WIRELESS_MODE_CW;
-    cfg->sd_mv = wireless_snap_u16(cfg->sd_mv, 100U, 1000U, 100U);
-    cfg->sd_phase_deg = wireless_snap_u16(cfg->sd_phase_deg, 0U, 330U, 30U);
-    cfg->am_depth_pct = wireless_snap_u8(cfg->am_depth_pct, 30U, 90U, 10U);
-    cfg->sm_delay_ns = wireless_snap_u16(cfg->sm_delay_ns, 50U, 200U, 30U);
-    cfg->sm_phase_deg = wireless_snap_u16(cfg->sm_phase_deg, 0U, 180U, 30U);
-    cfg->sm_atten_db = wireless_snap_u8(cfg->sm_atten_db, 0U, 20U, 2U);
-    cfg->square_khz = wireless_snap_u16(cfg->square_khz, 100U, 5000U, 100U);
     if (cfg->out_a >= WIRELESS_OUT_COUNT)
     {
         cfg->out_a = WIRELESS_OUT_SD;
@@ -107,46 +70,21 @@ static void wireless_normalize(wireless_config_t *cfg)
     cfg->auto_send = cfg->auto_send ? 1U : 0U;
 }
 
-static void wireless_step_u8(uint8_t *value, uint8_t min_v, uint8_t max_v, uint8_t step, int8_t dir)
+static void wireless_step_u32(uint32_t *value, uint32_t step, int8_t dir)
 {
-    int16_t v;
-
     if (value == NULL || dir == 0)
     {
         return;
     }
 
-    v = (int16_t)*value + ((dir > 0) ? step : -(int16_t)step);
-    if (v < (int16_t)min_v)
+    if (dir > 0)
     {
-        v = (int16_t)max_v;
+        *value = (*value > (UINT32_MAX - step)) ? UINT32_MAX : (*value + step);
     }
-    else if (v > (int16_t)max_v)
+    else
     {
-        v = (int16_t)min_v;
+        *value = (*value < step) ? 0U : (*value - step);
     }
-    *value = (uint8_t)v;
-}
-
-static void wireless_step_u16(uint16_t *value, uint16_t min_v, uint16_t max_v, uint16_t step, int8_t dir)
-{
-    int32_t v;
-
-    if (value == NULL || dir == 0)
-    {
-        return;
-    }
-
-    v = (int32_t)*value + ((dir > 0) ? step : -(int32_t)step);
-    if (v < (int32_t)min_v)
-    {
-        v = (int32_t)max_v;
-    }
-    else if (v > (int32_t)max_v)
-    {
-        v = (int32_t)min_v;
-    }
-    *value = (uint16_t)v;
 }
 
 static wireless_output_t wireless_step_output(wireless_output_t value, int8_t dir)
@@ -272,15 +210,15 @@ void Wireless_ControlFormatCommand(const wireless_config_t *cfg, char *buf, uint
 
     snprintf(buf,
              buf_size,
-             "WCFG,%lu,%s,%u,%u,%u,%u,%u,%u,%s,%s,%lu,%lu",
+             "WCFG,%lu,%s,%lu,%lu,%lu,%lu,%lu,%lu,%s,%s,%lu,%lu",
              (unsigned long)tmp.fc_mhz * 1000000UL,
              Wireless_ModeName(tmp.mode),
-             tmp.sd_mv,
-             tmp.sd_phase_deg,
-             tmp.am_depth_pct,
-             tmp.sm_delay_ns,
-             tmp.sm_phase_deg,
-             tmp.sm_atten_db,
+             (unsigned long)tmp.sd_mv,
+             (unsigned long)tmp.sd_phase_deg,
+             (unsigned long)tmp.am_depth_pct,
+             (unsigned long)tmp.sm_delay_ns,
+             (unsigned long)tmp.sm_phase_deg,
+             (unsigned long)tmp.sm_atten_db,
              Wireless_OutputName(tmp.out_a),
              Wireless_OutputName(tmp.out_b),
              (unsigned long)WIRELESS_MOD_HZ,
@@ -308,7 +246,7 @@ void Wireless_ControlSendBootDefault(void)
 
 void Wireless_ControlStepFc(int8_t dir)
 {
-    wireless_step_u8(&g_wireless_cfg.fc_mhz, 30U, 40U, 1U, dir);
+    wireless_step_u32(&g_wireless_cfg.fc_mhz, 1U, dir);
 }
 
 void Wireless_ControlStepMode(void)
@@ -318,37 +256,37 @@ void Wireless_ControlStepMode(void)
 
 void Wireless_ControlStepSdMv(int8_t dir)
 {
-    wireless_step_u16(&g_wireless_cfg.sd_mv, 100U, 1000U, 100U, dir);
+    wireless_step_u32(&g_wireless_cfg.sd_mv, 100U, dir);
 }
 
 void Wireless_ControlStepSdPhase(int8_t dir)
 {
-    wireless_step_u16(&g_wireless_cfg.sd_phase_deg, 0U, 330U, 30U, dir);
+    wireless_step_u32(&g_wireless_cfg.sd_phase_deg, 30U, dir);
 }
 
 void Wireless_ControlStepAmDepth(int8_t dir)
 {
-    wireless_step_u8(&g_wireless_cfg.am_depth_pct, 30U, 90U, 10U, dir);
+    wireless_step_u32(&g_wireless_cfg.am_depth_pct, 10U, dir);
 }
 
 void Wireless_ControlStepSmDelay(int8_t dir)
 {
-    wireless_step_u16(&g_wireless_cfg.sm_delay_ns, 50U, 200U, 30U, dir);
+    wireless_step_u32(&g_wireless_cfg.sm_delay_ns, 30U, dir);
 }
 
 void Wireless_ControlStepSmPhase(int8_t dir)
 {
-    wireless_step_u16(&g_wireless_cfg.sm_phase_deg, 0U, 180U, 30U, dir);
+    wireless_step_u32(&g_wireless_cfg.sm_phase_deg, 30U, dir);
 }
 
 void Wireless_ControlStepSmAtten(int8_t dir)
 {
-    wireless_step_u8(&g_wireless_cfg.sm_atten_db, 0U, 20U, 2U, dir);
+    wireless_step_u32(&g_wireless_cfg.sm_atten_db, 2U, dir);
 }
 
 void Wireless_ControlStepSquareKHz(int8_t dir)
 {
-    wireless_step_u16(&g_wireless_cfg.square_khz, 100U, 5000U, 100U, dir);
+    wireless_step_u32(&g_wireless_cfg.square_khz, 100U, dir);
 }
 
 void Wireless_ControlStepOutA(int8_t dir)
