@@ -94,6 +94,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/SYSTEM/usart/usart.c
     Drivers/BSP/24CXX/24cxx.c
     Drivers/BSP/ADC/adc.c
+    Drivers/BSP/CALIBRATION/calibration_table.c
     Drivers/BSP/FPGA/fpga_display.c
     Drivers/BSP/IIC/myiic.c
     Drivers/BSP/KEY/key.c
